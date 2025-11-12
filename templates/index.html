@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalendarz Rezerwacji</title>
+    <style>
+        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background-color: #f9f9f9; }
+        h1, h2 { text-align: center; color: #333; }
+        #calendar-container { margin-bottom: 20px; }
+        #calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        #calendar-header button { background: #007bff; color: white; border: none; padding: 10px; cursor: pointer; border-radius: 5px; }
+        #calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+        .day-name { font-weight: bold; text-align: center; padding: 5px; background: #eee; }
+        .day { text-align: center; padding: 15px 5px; cursor: pointer; border: 1px solid #ddd; background: #fff; transition: background 0.3s; }
+        .day.other-month { background-color: #f0f0f0; color: #aaa; }
+        .day:not(.other-month):hover { background-color: #e0efff; }
+        .day.selected { background-color: #007bff; color: white; }
+        #slots-container { text-align: center; }
+        .slot { display: inline-block; background: #28a745; color: white; padding: 10px; margin: 5px; cursor: pointer; border-radius: 5px; }
+        .slot:hover { background: #218838; }
+        #booking-form { display: none; margin-top: 20px; padding: 20px; border: 1px solid #ccc; border-radius: 5px; background: #fff; }
+        #booking-form input { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+<h1>Kalendarz Rezerwacji</h1>
+
+<div id="calendar-container">
+    <div id="calendar-header">
+        <button id="prev-month">&lt;</button>
+        <h2 id="month-year"></h2>
+        <button id="next-month">&gt;</button>
+    </div>
+    <div id="calendar-grid"></div>
+</div>
+
+<div id="slots-container">
+    <h3 id="slots-header" style="display:none;">Dostępne godziny:</h3>
+    <div id="slots-grid"></div>
+</div>
+
+<div id="booking-form">
+    <h3>Rezerwacja wizyty</h3>
+    <p>Termin: <strong id="booking-details"></strong></p>
+    <input type="text" id="name" placeholder="Imię i nazwisko" required>
+    <input type="tel" id="phone" placeholder="Numer telefonu" required>
+    <button id="submit-booking">Zarezerwuj</button>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const monthYearEl = document.getElementById('month-year');
+        const grid = document.getElementById('calendar-grid');
+        const prevBtn = document.getElementById('prev-month');
+        const nextBtn = document.getElementById('next-month');
+        const slotsGrid = document.getElementById('slots-grid');
+        const slotsHeader = document.getElementById('slots-header');
+        const bookingForm = document.getElementById('booking-form');
+        const bookingDetails = document.getElementById('booking-details');
+
+        let currentDate = new Date();
+        let selectedDate = null;
+        let selectedSlot = null;
+
+        const renderCalendar = () => {
+            grid.innerHTML = '';
+            slotsGrid.innerHTML = '';
+            slotsHeader.style.display = 'none';
+            bookingForm.style.display = 'none';
+
+            const month = currentDate.getMonth();
+            const year = currentDate.getFullYear();
+
+            monthYearEl.textContent = `${currentDate.toLocaleString('pl-PL', { month: 'long' })} ${year}`;
+
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            // Dni tygodnia
+            ['Nie', 'Pon', 'Wto', 'Śro', 'Czw', 'Pią', 'Sob'].forEach(day => {
+                const dayNameEl = document.createElement('div');
+                dayNameEl.className = 'day-name';
+                dayNameEl.textContent = day;
+                grid.appendChild(dayNameEl);
+            });
+
+            // Puste komórki przed pierwszym dniem miesiąca
+            for (let i = 0; i < (firstDay === 0 ? 6 : firstDay - 1); i++) {
+                grid.appendChild(document.createElement('div'));
+            }
+
+            // Dni miesiąca
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dayEl = document.createElement('div');
+                dayEl.className = 'day';
+                dayEl.textContent = day;
+                dayEl.dataset.date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+                dayEl.addEventListener('click', async () => {
+                    document.querySelectorAll('.day.selected').forEach(el => el.classList.remove('selected'));
+                    dayEl.classList.add('selected');
+                    selectedDate = dayEl.dataset.date;
+                    await fetchAndDisplaySlots(selectedDate);
+                });
+                grid.appendChild(dayEl);
+            }
+        };
+
+        const fetchAndDisplaySlots = async (date) => {
+            slotsGrid.innerHTML = 'Ładowanie...';
+            slotsHeader.style.display = 'block';
+            bookingForm.style.display = 'none';
+
+            try {
+                const response = await fetch(`/api/available_slots?date=${date}`);
+                const slots = await response.json();
+
+                slotsGrid.innerHTML = '';
+                if (slots.length > 0) {
+                    slots.forEach(slot => {
+                        const slotEl = document.createElement('div');
+                        slotEl.className = 'slot';
+                        slotEl.textContent = slot;
+                        slotEl.addEventListener('click', () => {
+                            selectedSlot = slot;
+                            bookingDetails.textContent = `${selectedDate} o godzinie ${selectedSlot}`;
+                            bookingForm.style.display = 'block';
+                        });
+                        slotsGrid.appendChild(slotEl);
+                    });
+                } else {
+                    slotsGrid.textContent = 'Brak wolnych terminów w tym dniu.';
+                }
+            } catch (error) {
+                slotsGrid.textContent = 'Błąd podczas pobierania terminów.';
+                console.error(error);
+            }
+        };
+
+        document.getElementById('submit-booking').addEventListener('click', async () => {
+            const name = document.getElementById('name').value;
+            const phone = document.getElementById('phone').value;
+
+            if (!name || !phone) {
+                alert('Proszę wypełnić wszystkie pola.');
+                return;
+            }
+
+            const bookingData = {
+                name: name,
+                phone_number: phone,
+                date: selectedDate,
+                time: selectedSlot
+            };
+
+            try {
+                const response = await fetch('/api/appointments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(bookingData)
+                });
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert('Wizyta została pomyślnie zarezerwowana!');
+                    renderCalendar(); // Odśwież kalendarz
+                } else {
+                    alert(`Błąd: ${result.error || 'Nieznany błąd'}`);
+                }
+            } catch (error) {
+                alert('Wystąpił błąd sieciowy.');
+                console.error(error);
+            }
+        });
+
+        prevBtn.addEventListener('click', () => {
+            currentDate.setMonth(currentDate.getMonth() - 1);
+            renderCalendar();
+        });
+
+        nextBtn.addEventListener('click', () => {
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            renderCalendar();
+        });
+
+        renderCalendar();
+    });
+</script>
+</body>
+</html>
