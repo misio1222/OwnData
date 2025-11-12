@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS appointments;
+
+CREATE TABLE appointments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  date TEXT NOT NULL,
+  phone_number TEXT NOT NULL
+);
