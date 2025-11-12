@@ -1,24 +1,25 @@
-# System Rejestracji Wizyt
+# Zaawansowany System Rejestracji Wizyt
 
-Prosty system do rejestracji wizyt składający się z aplikacji webowej (Flask) oraz aplikacji desktopowej (Tkinter). System umożliwia dodawanie, przeglądanie i usuwanie wizyt oraz wysyła powiadomienia SMS o nowo dodanych rezerwacjach za pomocą Twilio.
+Kompleksowy system do zarządzania rezerwacjami, zbudowany w Pythonie przy użyciu frameworka Flask. Składa się z interfejsu webowego z dynamicznym kalendarzem dla pacjentów oraz aplikacji desktopowej (Tkinter) do zaawansowanego zarządzania harmonogramem i ustawieniami.
 
-## Funkcjonalności
+## Główne Funkcje
 
--   **Aplikacja webowa:**
-    -   Formularz do dodawania nowych wizyt.
-    -   Lista wszystkich zarejestrowanych wizyt.
-    -   Możliwość usuwania wizyt.
--   **Aplikacja desktopowa:**
-    -   Graficzny interfejs do zarządzania wizytami.
-    -   Synchronizacja z serwerem w czasie rzeczywistym.
-    -   Dodawanie i usuwanie wizyt.
--   **Powiadomienia SMS:**
-    -   Automatyczne wysyłanie potwierdzenia o rezerwacji na podany numer telefonu.
+-   **Dynamiczny Kalendarz (Strona WWW):**
+    -   Pacjenci mogą przeglądać dostępne dni w interaktywnym kalendarzu.
+    -   Po wybraniu dnia, system wyświetla listę wolnych godzin, obliczoną na podstawie harmonogramu pracy i istniejących rezerwacji.
+    -   Prosty formularz pozwala na szybką rezerwację wybranego terminu.
+
+-   **Aplikacja Desktopowa do Zarządzania:**
+    -   **Zarządzanie wizytami:** Przeglądanie i usuwanie wszystkich zarezerwowanych wizyt.
+    -   **Zarządzanie harmonogramem:** Definiowanie dni i godzin przyjęć. Można dodać wiele przedziałów czasowych dla jednego dnia (np. rano i po południu).
+    -   **Ustawienia:** Możliwość zdefiniowania domyślnej długości jednej wizyty (w minutach), co automatycznie wpływa na generowane "sloty" w kalendarzu.
+
+-   **Centralne API:**
+    -   Wszystkie operacje (zarówno z aplikacji webowej, jak i desktopowej) są obsługiwane przez centralne API, co zapewnia spójność danych.
 
 ## Wymagania
 
--   Python 3.6+
--   Konto Twilio (do wysyłania powiadomień SMS)
+-   Python 3.7+
 
 ## Instalacja
 
@@ -34,58 +35,38 @@ Prosty system do rejestracji wizyt składający się z aplikacji webowej (Flask)
     source venv/bin/activate  # Na Windows: venv\Scripts\activate
     ```
 
-3.  **Zainstaluj wymagane biblioteki:**
+3.  **Zainstaluj wymagane zależności:**
     ```bash
-    pip install -r requirements.txt
+    pip install Flask requests
     ```
 
-## Konfiguracja
+## Konfiguracja i Uruchomienie
 
-### 1. Baza danych
+### 1. Inicjalizacja Bazy Danych
 
-Przed pierwszym uruchomieniem aplikacji webowej, musisz zainicjować bazę danych. Uruchom poniższą komendę w terminalu, w głównym katalogu projektu:
+Przed pierwszym uruchomieniem, musisz stworzyć i zainicjować bazę danych. Użyj poniższej komendy w głównym katalogu projektu:
 
 ```bash
 flask initdb
 ```
-Spowoduje to utworzenie pliku `database.db`, w którym będą przechowywane dane.
+Ta komenda utworzy plik `database.db` z wymaganą strukturą tabel.
 
-### 2. Powiadomienia SMS (Twilio)
+### 2. Uruchomienie Aplikacji Webowej (Serwera)
 
-Aby powiadomienia SMS działały, musisz skonfigurować trzy zmienne środowiskowe. Zastąp wartości przykładowe swoimi danymi z konta Twilio.
+Serwer Flask musi działać w tle, aby zarówno strona WWW, jak i aplikacja desktopowa mogły z niego korzystać.
 
-**Linux/macOS:**
-```bash
-export TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-export TWILIO_AUTH_TOKEN="twoj_auth_token"
-export TWILIO_PHONE_NUMBER="+1234567890" # Twój numer telefonu Twilio
-```
-
-**Windows (Command Prompt):**
-```bash
-set TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-set TWILIO_AUTH_TOKEN="twoj_auth_token"
-set TWILIO_PHONE_NUMBER="+1234567890"
-```
-
-> **Uwaga:** Jeśli nie skonfigurujesz powyższych zmiennych, aplikacja będzie działać, ale powiadomienia SMS będą jedynie symulowane (wyświetlane w konsoli), a nie faktycznie wysyłane.
-
-## Uruchomienie
-
-Projekt składa się z dwóch aplikacji, które muszą być uruchomione jednocześnie, aby aplikacja desktopowa mogła komunikować się z serwerem.
-
-### 1. Uruchomienie aplikacji webowej (serwera)
-
-W terminalu, w głównym katalogu projektu, uruchom:
 ```bash
 flask run
 ```
 Serwer będzie dostępny pod adresem `http://127.0.0.1:5000`.
 
-### 2. Uruchomienie aplikacji desktopowej
+### 3. Uruchomienie Aplikacji Desktopowej
 
-Otwórz **nowy terminal** i, upewniwszy się, że wirtualne środowisko jest aktywne, uruchom:
+Otwórz **nowy terminal**, aktywuj wirtualne środowisko i uruchom aplikację do zarządzania:
+
 ```bash
 python desktop_app.py
 ```
-Pojawi się okno aplikacji, w którym możesz zarządzać wizytami.
+Pojawi się okno z trzema zakładkami, w których możesz zarządzać systemem.
+
+> **Ważne:** Aplikacja webowa i desktopowa muszą działać jednocześnie. Najpierw skonfiguruj harmonogram i długość wizyt w aplikacji desktopowej, a następnie otwórz stronę `http://127.0.0.1:5000` w przeglądarce, aby zobaczyć kalendarz i dokonać rezerwacji.

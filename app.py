@@ -1,29 +1,12 @@
 import sqlite3
 import os
 from flask import Flask, jsonify, render_template, request, g, redirect, url_for
-from twilio.rest import Client
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 DATABASE = 'database.db'
 
-# --- Twilio Configuration ---
-# Upewnij się, że ustawiłeś te zmienne środowiskowe przed uruchomieniem aplikacji
-# Przykład: export TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxx"
-TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
-TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
-TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER')
-
-# Sprawdzenie, czy konfiguracja Twilio jest obecna
-if all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]):
-    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    twilio_configured = True
-else:
-    twilio_configured = False
-    print("OSTRZEŻENIE: Brak konfiguracji Twilio. Powiadomienia SMS nie będą wysyłane.")
-    print("Ustaw zmienne środowiskowe: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER")
-
-
-# --- Database Helper Functions ---
+# --- Połączenie z bazą danych ---
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
@@ -44,102 +27,154 @@ def init_db():
             db.cursor().executescript(f.read())
         db.commit()
 
-# Command to initialize the database
 @app.cli.command('initdb')
 def initdb_command():
-    """Initializes the database."""
     init_db()
-    print('Initialized the database.')
+    print('Baza danych została zainicjowana.')
 
-# --- SMS Sending Function ---
-def send_sms_notification(phone_number, message):
-    if not twilio_configured:
-        print(f"--- SYMULACJA WYSYŁKI SMS (brak konfiguracji Twilio) ---")
-        print(f"Do: {phone_number}")
-        print(f"Wiadomość: {message}")
-        print(f"----------------------------------------------------")
-        return
+# --- Funkcje pomocnicze do logiki biznesowej ---
+def get_setting(key):
+    db = get_db()
+    cursor = db.execute('SELECT value FROM settings WHERE key = ?', (key,))
+    row = cursor.fetchone()
+    return row['value'] if row else None
 
+def calculate_available_slots(date_str):
+    db = get_db()
+
+    # Pobierz długość wizyty z ustawień
+    duration = int(get_setting('appointment_duration'))
+
+    # Znajdź dzień tygodnia dla podanej daty (0=poniedziałek, ..., 6=niedziela)
     try:
-        twilio_client.messages.create(
-            body=message,
-            from_=TWILIO_PHONE_NUMBER,
-            to=phone_number
-        )
-        print(f"Wiadomość SMS została wysłana do {phone_number}")
-    except Exception as e:
-        print(f"Błąd podczas wysyłania SMS do {phone_number}: {e}")
+        target_date = datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        return []
+    day_of_week = target_date.weekday()
 
+    # Pobierz godziny pracy dla tego dnia
+    cursor = db.execute('SELECT start_time, end_time FROM availability WHERE day_of_week = ?', (day_of_week,))
+    availability = cursor.fetchall()
 
-# --- Web App Routes ---
-@app.route('/', methods=['GET', 'POST'])
+    if not availability:
+        return [] # Brak godzin pracy w tym dniu
+
+    # Pobierz już zarezerwowane wizyty
+    cursor = db.execute('SELECT time FROM appointments WHERE date = ?', (date_str,))
+    booked_slots = {row['time'] for row in cursor.fetchall()}
+
+    # Generuj wszystkie możliwe sloty i odfiltruj zajęte
+    available_slots = []
+    for schedule in availability:
+        start_time = datetime.strptime(schedule['start_time'], '%H:%M')
+        end_time = datetime.strptime(schedule['end_time'], '%H:%M')
+
+        current_slot = start_time
+        while current_slot < end_time:
+            slot_str = current_slot.strftime('%H:%M')
+            if slot_str not in booked_slots:
+                available_slots.append(slot_str)
+            current_slot += timedelta(minutes=duration)
+
+    return available_slots
+
+# --- Główne trasy aplikacji webowej ---
+@app.route('/')
 def index():
-    db = get_db()
-    if request.method == 'POST':
-        name = request.form['name']
-        date = request.form['date']
-        phone_number = request.form['phone_number']
+    return render_template('index.html')
 
-        if name and date and phone_number:
-            db.execute(
-                'INSERT INTO appointments (name, date, phone_number) VALUES (?, ?, ?)',
-                (name, date, phone_number)
-            )
-            db.commit()
+# --- API Endpoints ---
 
-            sms_message = f"Cześć {name}! Twoja wizyta została pomyślnie zarezerwowana na {date}."
-            send_sms_notification(phone_number, sms_message)
-
-            return redirect(url_for('index'))
-
-    cursor = db.execute('SELECT * FROM appointments ORDER BY id DESC')
-    appointments = cursor.fetchall()
-    return render_template('index.html', appointments=appointments)
-
-@app.route('/delete/<int:id>', methods=['POST'])
-def delete(id):
-    db = get_db()
-    db.execute('DELETE FROM appointments WHERE id = ?', (id,))
-    db.commit()
-    return redirect(url_for('index'))
-
-
-# --- API Endpoints for Desktop App ---
+# API: Zarządzanie wizytami
 @app.route('/api/appointments', methods=['GET'])
 def get_appointments():
     db = get_db()
-    cursor = db.execute('SELECT * FROM appointments ORDER BY id DESC')
+    cursor = db.execute('SELECT * FROM appointments ORDER BY date, time')
     appointments = [dict(row) for row in cursor.fetchall()]
     return jsonify(appointments)
 
 @app.route('/api/appointments', methods=['POST'])
 def add_appointment():
     data = request.json
-    name = data.get('name')
-    date = data.get('date')
-    phone_number = data.get('phone_number')
-
-    if not name or not date or not phone_number:
-        return jsonify({'error': 'Missing data'}), 400
+    required_fields = ['name', 'phone_number', 'date', 'time']
+    if not all(field in data for field in required_fields):
+        return jsonify({'error': 'Brakujące dane'}), 400
 
     db = get_db()
-    cursor = db.execute(
-        'INSERT INTO appointments (name, date, phone_number) VALUES (?, ?, ?)',
-        (name, date, phone_number)
+    db.execute(
+        'INSERT INTO appointments (name, phone_number, date, time) VALUES (?, ?, ?, ?)',
+        (data['name'], data['phone_number'], data['date'], data['time'])
     )
     db.commit()
-
-    sms_message = f"Cześć {name}! Twoja wizyta została pomyślnie zarezerwowana na {date}."
-    send_sms_notification(phone_number, sms_message)
-
-    return jsonify({'id': cursor.lastrowid, 'name': name, 'date': date, 'phone_number': phone_number}), 201
+    return jsonify({'message': 'Wizyta dodana pomyślnie'}), 201
 
 @app.route('/api/appointments/<int:id>', methods=['DELETE'])
 def delete_appointment(id):
     db = get_db()
     db.execute('DELETE FROM appointments WHERE id = ?', (id,))
     db.commit()
-    return jsonify({'message': 'Appointment deleted successfully'}), 200
+    return jsonify({'message': 'Wizyta usunięta pomyślnie'}), 200
+
+# API: Ustawienia
+@app.route('/api/settings/duration', methods=['GET'])
+def get_duration():
+    duration = get_setting('appointment_duration')
+    return jsonify({'duration': int(duration) if duration else 30})
+
+@app.route('/api/settings/duration', methods=['POST'])
+def set_duration():
+    data = request.json
+    duration = data.get('duration')
+    if not duration or not isinstance(duration, int) or duration <= 0:
+        return jsonify({'error': 'Nieprawidłowa wartość czasu trwania'}), 400
+
+    db = get_db()
+    db.execute("UPDATE settings SET value = ? WHERE key = 'appointment_duration'", (str(duration),))
+    db.commit()
+    return jsonify({'message': 'Czas trwania wizyty zaktualizowany'}), 200
+
+# API: Dostępność
+@app.route('/api/availability', methods=['GET'])
+def get_availability():
+    db = get_db()
+    cursor = db.execute('SELECT * FROM availability ORDER BY day_of_week, start_time')
+    availability = [dict(row) for row in cursor.fetchall()]
+    return jsonify(availability)
+
+@app.route('/api/availability', methods=['POST'])
+def add_availability():
+    data = request.json
+    required = ['day_of_week', 'start_time', 'end_time']
+    if not all(field in data for field in required):
+        return jsonify({'error': 'Brakujące dane'}), 400
+
+    db = get_db()
+    try:
+        db.execute(
+            'INSERT INTO availability (day_of_week, start_time, end_time) VALUES (?, ?, ?)',
+            (data['day_of_week'], data['start_time'], data['end_time'])
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'Taki harmonogram już istnieje'}), 409
+    return jsonify({'message': 'Dodano nowy harmonogram pracy'}), 201
+
+@app.route('/api/availability/<int:id>', methods=['DELETE'])
+def delete_availability(id):
+    db = get_db()
+    db.execute('DELETE FROM availability WHERE id = ?', (id,))
+    db.commit()
+    return jsonify({'message': 'Harmonogram usunięty'}), 200
+
+# API: Wolne terminy
+@app.route('/api/available_slots', methods=['GET'])
+def get_available_slots():
+    date_str = request.args.get('date')
+    if not date_str:
+        return jsonify({'error': 'Brak parametru daty'}), 400
+
+    slots = calculate_available_slots(date_str)
+    return jsonify(slots)
 
 if __name__ == '__main__':
     app.run(debug=True)
